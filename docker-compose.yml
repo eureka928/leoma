@@ -1,0 +1,36 @@
+# Leoma Subnet Docker Compose (validator only)
+
+services:
+  # Validator: evaluator + weight setter in one container
+  validator:
+    build: .
+    image: rendixnetwork/leoma:latest
+    container_name: leoma-validator
+    restart: unless-stopped
+    command: leoma serve
+    env_file:
+      - .env
+    environment:
+      API_URL: ${API_URL}
+      NETWORK: ${NETWORK:-finney}
+      NETUID: ${NETUID:-99}
+      EPOCH_LEN: ${EPOCH_LEN:-180}
+      WALLET_NAME: ${WALLET_NAME:-default}
+      HOTKEY_NAME: ${HOTKEY_NAME:-default}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      HIPPIUS_ENDPOINT: ${HIPPIUS_ENDPOINT:-s3.hippius.com}
+      HIPPIUS_REGION: ${HIPPIUS_REGION:-decentralized}
+      HIPPIUS_SAMPLES_BUCKET: ${HIPPIUS_SAMPLES_BUCKET:-samples}
+      HIPPIUS_SAMPLES_READ_ACCESS_KEY: ${HIPPIUS_SAMPLES_READ_ACCESS_KEY}
+      HIPPIUS_SAMPLES_READ_SECRET_KEY: ${HIPPIUS_SAMPLES_READ_SECRET_KEY}
+    volumes:
+      - ~/.bittensor/wallets:/root/.bittensor/wallets:ro
+
+  # Watchtower: polls registry and restarts leoma-validator when image is updated
+  watchtower:
+    image: nickfedor/watchtower
+    container_name: leoma-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 30 leoma-validator

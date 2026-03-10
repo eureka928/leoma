@@ -1,0 +1,33 @@
+# Git and env
+.git
+.gitignore
+.env
+.env.*
+
+# Python
+__pycache__
+*.py[cod]
+*.pyo
+.venv
+venv
+*.egg-info
+.eggs
+
+# Tests and tooling (not needed in image)
+tests
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+
+# Docs and compose (optional; keep if you want them in image)
+# leoma-docs
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# IDE and OS
+.idea
+.vscode
+.DS_Store
+Thumbs.db

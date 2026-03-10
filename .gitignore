@@ -1,0 +1,38 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Docker volumes
+validator-data/
+
+# Bittensor wallets (never commit these!)
+wallets/
+.bittensor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+
+.pytest_cache/

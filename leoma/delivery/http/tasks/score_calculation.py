@@ -1,0 +1,314 @@
+"""
+Score calculation background task for dashboard.
+
+1) Per-validator scores: from validator_samples into rank_scores (dashboard).
+2) Stake-weighted scorer: every SCORER_INTERVAL (1h), use latest 100 evaluated tasks,
+   compute per (task_id, miner) pass/fail via stake-weighted validator votes, rank miners
+   with completeness >= 0.8, persist to miner_task_ranks.
+3) Rank (dominance): same 1h cycle, compute top-ranked miner by dominance (block order + 5%
+   threshold), full rank by passed_count, persist to miner_ranks for /weights and /rank.
+"""
+
+import os
+import asyncio
+from typing import Dict, Set, List, Tuple, Optional
+
+from leoma.bootstrap import emit_log as log, emit_header as log_header, log_exception
+from leoma.infra.rank import find_dominant_winner, compute_rank_from_miner_stats
+from leoma.infra.db.stores import (
+    MinerRankStore,
+    MinerTaskRankStore,
+    ParticipantStore,
+    RankStore,
+    SampleStore,
+    ValidatorStore,
+)
+
+
+# Configuration
+SCORE_CALCULATION_INTERVAL = int(os.environ.get("SCORE_CALCULATION_INTERVAL", "300"))  # 5 min
+SCORER_INTERVAL = int(os.environ.get("SCORER_INTERVAL", "3600"))  # 1 hour
+SCORER_TASK_WINDOW = 100
+SCORER_COMPLETENESS_THRESHOLD = 0.8
+# Dominance: late miner must beat each earlier miner's pass_rate by this threshold to be top
+DOMINANCE_THRESHOLD = float(os.environ.get("DOMINANCE_THRESHOLD", "0.05"))
+
+
+class ScoreCalculationTask:
+    """Background task for calculating dashboard scores from submitted samples.
+    
+    Calculates per-validator, per-miner scores from validator_samples.
+    No cross-validator aggregation - each validator's scores stored separately.
+    """
+    
+    def __init__(self):
+        self.validator_samples_dao = SampleStore()
+        self.rank_scores_dao = RankStore()
+        self.validators_dao = ValidatorStore()
+        self.valid_miners_dao = ParticipantStore()
+        self.miner_task_rank_dao = MinerTaskRankStore()
+        self.miner_rank_dao = MinerRankStore()
+        self._running = False
+        self._last_scorer_run = 0.0
+
+    async def run(self) -> None:
+        """Run the score calculation task loop."""
+        self._running = True
+        log(f"Score calculation task starting (interval={SCORE_CALCULATION_INTERVAL}s, scorer={SCORER_INTERVAL}s)", "start")
+        await asyncio.sleep(10)
+
+        while self._running:
+            try:
+                await self._calculate_and_store_scores()
+            except Exception as e:
+                log(f"Score calculation error: {e}", "error")
+                log_exception("Score calculation error", e)
+
+            import time
+            now = time.monotonic()
+            if now - self._last_scorer_run >= SCORER_INTERVAL:
+                try:
+                    await self._run_stake_weighted_scorer()
+                    await self._run_rank_update()
+                    self._last_scorer_run = now
+                except Exception as e:
+                    log(f"Stake-weighted scorer / rank error: {e}", "error")
+                    log_exception("Stake-weighted scorer / rank error", e)
+
+            await asyncio.sleep(SCORE_CALCULATION_INTERVAL)
+    
+    def stop(self) -> None:
+        """Stop the task."""
+        self._running = False
+
+    @staticmethod
+    def _build_scores_for_validator(
+        stats: Dict[str, Dict[str, int | float]],
+        valid_hotkeys: Set[str],
+    ) -> Dict[str, Dict[str, int | float]]:
+        """Build batch score payload for a validator, filtered by valid miners."""
+        scores_to_save: Dict[str, Dict[str, int | float]] = {}
+        for miner_hotkey, miner_stats in stats.items():
+            if miner_hotkey not in valid_hotkeys:
+                continue
+
+            passed_count = miner_stats.get("passed_count", 0)
+            total = miner_stats.get("total", 0)
+            pass_rate = miner_stats.get("pass_rate", 0.0)
+            scores_to_save[miner_hotkey] = {
+                "score": pass_rate,
+                "total_samples": total,
+                "total_passed": passed_count,
+                "pass_rate": pass_rate,
+            }
+        return scores_to_save
+
+    @staticmethod
+    def _aggregate_miner_totals(all_scores: list) -> Dict[str, Dict[str, int]]:
+        """Aggregate total passed_count/samples by miner across validators."""
+        miner_totals: Dict[str, Dict[str, int]] = {}
+        for score in all_scores:
+            if score.miner_hotkey not in miner_totals:
+                miner_totals[score.miner_hotkey] = {"passed_count": 0, "total": 0}
+            miner_totals[score.miner_hotkey]["passed_count"] += score.total_passed
+            miner_totals[score.miner_hotkey]["total"] += score.total_samples
+        return miner_totals
+
+    @staticmethod
+    def _find_leader(miner_totals: Dict[str, Dict[str, int]]) -> tuple[str | None, float]:
+        """Find miner with highest aggregated pass rate."""
+        leader: str | None = None
+        leader_rate = 0.0
+        for hotkey, totals in miner_totals.items():
+            if totals["total"] <= 0:
+                continue
+            rate = totals["passed_count"] / totals["total"]
+            if rate > leader_rate:
+                leader = hotkey
+                leader_rate = rate
+        return leader, leader_rate
+    
+    async def _get_valid_miner_hotkeys(self) -> Set[str]:
+        """Get set of valid miner hotkeys."""
+        valid_miners = await self.valid_miners_dao.get_valid_miners()
+        return {m.miner_hotkey for m in valid_miners}
+    
+    async def _cleanup_invalid_miner_scores(self, valid_hotkeys: Set[str]) -> int:
+        """Remove scores for miners that are no longer valid.
+        
+        Args:
+            valid_hotkeys: Set of currently valid miner hotkeys
+            
+        Returns:
+            Number of scores removed
+        """
+        all_scores = await self.rank_scores_dao.get_all_scores()
+        removed = 0
+        
+        for score in all_scores:
+            if score.miner_hotkey not in valid_hotkeys:
+                await self.rank_scores_dao.delete_scores_by_miner(score.miner_hotkey)
+                removed += 1
+        
+        return removed
+    
+    async def _calculate_and_store_scores(self) -> None:
+        """Calculate scores from samples and store in rank_scores for dashboard.
+        
+        For each validator:
+        - Get their submitted samples from validator_samples
+        - Calculate pass rate per miner
+        - Store in rank_scores (one row per validator-miner pair)
+        
+        Only includes scores for valid miners.
+        """
+        log_header("Dashboard Score Calculation")
+        
+        # Get valid miner hotkeys
+        valid_hotkeys = await self._get_valid_miner_hotkeys()
+        
+        if not valid_hotkeys:
+            log("No valid miners found", "info")
+            return
+        
+        log(f"Found {len(valid_hotkeys)} valid miners", "info")
+        
+        # Clean up scores for invalid miners
+        removed = await self._cleanup_invalid_miner_scores(valid_hotkeys)
+        if removed > 0:
+            log(f"Removed {removed} scores for invalid miners", "info")
+        
+        # Get all validators
+        validators = await self.validators_dao.get_all_validators()
+        
+        if not validators:
+            log("No validators found", "info")
+            return
+        
+        total_scores = 0
+        
+        for validator in validators:
+            # Get miner stats for this validator from their submitted samples
+            stats = await self.validator_samples_dao.get_miner_stats_by_validator(
+                validator.hotkey
+            )
+            
+            if not stats:
+                continue
+            
+            scores_to_save = self._build_scores_for_validator(stats, valid_hotkeys)
+            
+            if not scores_to_save:
+                continue
+            
+            # Save this validator's scores (one row per miner)
+            count = await self.rank_scores_dao.batch_save_scores(
+                validator_hotkey=validator.hotkey,
+                scores=scores_to_save,
+            )
+            total_scores += count
+        
+        log(f"Updated {total_scores} dashboard scores from {len(validators)} validators", "success")
+        
+        # Log current leader (based on simple pass rate, not weighted)
+        all_scores = await self.rank_scores_dao.get_all_scores()
+        if all_scores:
+            miner_totals = self._aggregate_miner_totals(all_scores)
+            leader, leader_rate = self._find_leader(miner_totals)
+            
+            if leader:
+                t = miner_totals[leader]
+                log(
+                    f"Dashboard leader: {leader[:8]}... "
+                    f"({t['passed_count']}/{t['total']} passes, {leader_rate:.1%})",
+                    "info"
+                )
+
+    async def _run_stake_weighted_scorer(self) -> None:
+        """Stake-weighted scorer: latest 100 tasks, completeness >= 0.8, rank by task_passed_count."""
+        log_header("Stake-weighted Scorer (latest 100 tasks)")
+        task_ids = await self.validator_samples_dao.get_latest_evaluated_task_ids(
+            limit=SCORER_TASK_WINDOW
+        )
+        if len(task_ids) < 10:
+            log("Not enough evaluated tasks for scorer", "info")
+            return
+        window_size = len(task_ids)
+        samples = await self.validator_samples_dao.get_samples_in_task_window(task_ids)
+        validators = await self.validators_dao.get_all_validators()
+        stake_by_validator: Dict[str, float] = {v.hotkey: max(0.0, float(v.stake)) for v in validators}
+
+        # (task_id, miner_hotkey) -> list of (validator_hotkey, passed_flag 0/1)
+        votes: Dict[Tuple[int, str], List[Tuple[str, int]]] = {}
+        for s in samples:
+            key = (s.task_id, s.miner_hotkey)
+            if key not in votes:
+                votes[key] = []
+            passed_flag = 1 if s.passed else 0
+            votes[key].append((s.validator_hotkey, passed_flag))
+
+        # Per (task_id, miner): avg_score = sum(stake * passed_flag) / total_stake; task passes when avg_score > 0.5
+        task_passes: Dict[str, Set[int]] = {}  # miner_hotkey -> set of task_ids that are pass
+        task_evaluated: Dict[str, Set[int]] = {}  # miner_hotkey -> set of task_ids evaluated
+        for (task_id, miner_hotkey), vlist in votes.items():
+            if miner_hotkey not in task_evaluated:
+                task_evaluated[miner_hotkey] = set()
+                task_passes[miner_hotkey] = set()
+            task_evaluated[miner_hotkey].add(task_id)
+            total_stake = sum(stake_by_validator.get(vh, 0.0) for vh, _ in vlist)
+            if total_stake <= 0:
+                continue
+            weighted_sum = sum(stake_by_validator.get(vh, 0.0) * w for vh, w in vlist)
+            avg_score = weighted_sum / total_stake
+            if avg_score > 0.5:
+                task_passes[miner_hotkey].add(task_id)
+
+        # completeness = tasks_evaluated / window_size; rank only miners with completeness >= 0.8
+        valid_miners = await self._get_valid_miner_hotkeys()
+        eligible: List[Tuple[str, int, int, float]] = []
+        for miner_hotkey in set(task_evaluated.keys()):
+            if miner_hotkey not in valid_miners:
+                continue
+            evaluated = len(task_evaluated[miner_hotkey])
+            completeness = evaluated / window_size if window_size else 0.0
+            if completeness < SCORER_COMPLETENESS_THRESHOLD:
+                continue
+            passed_count = len(task_passes.get(miner_hotkey, set()))
+            eligible.append((miner_hotkey, passed_count, evaluated, completeness))
+        eligible.sort(key=lambda x: (-x[1], -x[2]))
+
+        for r, (miner_hotkey, passed_count, evaluated, completeness) in enumerate(eligible, start=1):
+            await self.miner_task_rank_dao.upsert(
+                miner_hotkey=miner_hotkey,
+                task_passed_count=passed_count,
+                tasks_evaluated=evaluated,
+                completeness=completeness,
+                rank=r,
+            )
+        log(f"Stake-weighted scorer: {len(eligible)} miners ranked (window={window_size}, completeness>={SCORER_COMPLETENESS_THRESHOLD})", "success")
+        if eligible:
+            top = eligible[0]
+            log(f"Top miner: {top[0][:12]}... ({top[1]} task passes, rank 1)", "info")
+
+    async def _run_rank_update(self) -> None:
+        """Compute rank by dominance (block + 5% threshold), persist to miner_ranks.
+        Rank 1 = top-ranked miner; rest by passed_count desc. Used by GET /weights and GET /rank.
+        """
+        log_header("Rank update (dominance)")
+        valid_miners = await self.valid_miners_dao.get_valid_miners()
+        if not valid_miners:
+            log("No valid miners for rank", "info")
+            return
+        aggregated = await self.rank_scores_dao.get_aggregated_scores()
+        block_by_hotkey: Dict[str, Optional[int]] = {m.miner_hotkey: m.block for m in valid_miners}
+        miner_stats: List[Tuple[str, int, float, Optional[int]]] = []
+        for m in valid_miners:
+            hotkey = m.miner_hotkey
+            agg = aggregated.get(hotkey) or {}
+            total_passed = agg.get("total_passed", 0) or 0
+            total_samples = agg.get("total_samples", 0) or 0
+            pass_rate = agg.get("pass_rate") or (total_passed / total_samples if total_samples else 0.0)
+            miner_stats.append((hotkey, total_passed, float(pass_rate), block_by_hotkey.get(hotkey)))
+        winner_hotkey, rank_entries = compute_rank_from_miner_stats(miner_stats, DOMINANCE_THRESHOLD)
+        await self.miner_rank_dao.replace_all(rank_entries)
+        log(f"Rank updated: {len(rank_entries)} miners, top_hotkey={winner_hotkey[:12] if winner_hotkey else 'None'}...", "success")
