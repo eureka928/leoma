@@ -1,9 +1,38 @@
 # Bootstrap: runtime config and logging.
 
 from leoma.bootstrap.runtime import (
+    # Core logger
     logger,
     log_exception,
+    
+    # New logging functions
+    emit_log,
+    emit_header,
+    emit_section,
+    log_debug,
+    log_info,
+    log_success,
+    log_warning,
+    log_error,
+    log_critical,
+    log_start,
+    
+    # Log context
+    set_log_context,
+    clear_log_context,
+    get_log_context,
+    
+    # Timing
+    LogTimer,
+    timed,
+    
+    # Log levels
+    LogLevel,
+    
+    # Legacy
     USED_VIDEOS,
+    
+    # Settings
     CHUTES_API_KEY,
     CHUTES_API_URL,
     CLIP_DURATION,
@@ -45,14 +74,11 @@ from leoma.bootstrap.runtime import (
     SAMPLES_BUCKET,
     SOURCE_BUCKET,
     WALLET_NAME,
-    emit_header,
-    emit_log,
-    log_exception,
-    logger,
     settings,
 )
 
 __all__ = [
+    # Settings
     "settings",
     "USED_VIDEOS",
     "CHUTES_API_KEY",
@@ -96,8 +122,32 @@ __all__ = [
     "SAMPLES_BUCKET",
     "SOURCE_BUCKET",
     "WALLET_NAME",
+    
+    # Core logging
+    "logger",
+    "log_exception",
+    
+    # New logging functions
     "emit_log",
     "emit_header",
-    "log_exception",
-    "logger",
+    "emit_section",
+    "log_debug",
+    "log_info",
+    "log_success",
+    "log_warning",
+    "log_error",
+    "log_critical",
+    "log_start",
+    
+    # Log context
+    "set_log_context",
+    "clear_log_context",
+    "get_log_context",
+    
+    # Timing
+    "LogTimer",
+    "timed",
+    
+    # Log levels
+    "LogLevel",
 ]
