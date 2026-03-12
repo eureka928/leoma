@@ -1,6 +1,6 @@
 # Infrastructure: DB, storage, external services.
 
-from leoma.infra.commit_parser import parse_commit, validate_commit_fields
+from leoma.infra.commit_parser import parse_commit, validate_commit_fields, validate_commit_count
 from leoma.infra.chute_resolver import build_chute_endpoint, get_chute_info
 from leoma.infra.storage_backend import (
     create_minio_client,
@@ -70,6 +70,7 @@ __all__ = [
     "upload_evaluation_result_json",
     "upload_task_artifacts",
     "validate_commit_fields",
+    "validate_commit_count",
     "validate_miner",
     "expand_corpus_random",
 ]

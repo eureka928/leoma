@@ -17,7 +17,7 @@ import bittensor as bt
 
 from leoma.bootstrap import emit_log as log, emit_header as log_header, log_exception, NETUID, NETWORK
 from leoma.infra.db.stores import BlacklistStore, ParticipantStore
-from leoma.infra.commit_parser import parse_commit, validate_commit_fields
+from leoma.infra.commit_parser import parse_commit, validate_commit_fields, validate_commit_count
 from leoma.infra.eligibility import validate_miner
 from leoma.delivery.http.routes.health import update_last_sync
 
@@ -138,6 +138,16 @@ class MinerValidationTask:
                     
                     # Parse commitment
                     commit_block, commit_value = commit_data[-1]
+                    
+                    # Check commit count limit (max 2 commits per hotkey)
+                    is_valid_count, count_reason = validate_commit_count(len(commit_data))
+                    if not is_valid_count:
+                        log(f"Invalid commit: {hotkey} - {count_reason} (has {len(commit_data)} commits)", "error")
+                        validated_miners.append(
+                            self._invalid_commit_entry(uid, hotkey, commit_block, count_reason)
+                        )
+                        continue
+                    
                     parsed = parse_commit(commit_value)
                     
                     # Validate commit fields (model_name must start with "leoma", end with hotkey)

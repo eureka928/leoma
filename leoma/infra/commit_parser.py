@@ -18,6 +18,7 @@ _COMMIT_REQUIRED_FIELDS = (
 )
 
 MODEL_NAME_PREFIX = "leoma"
+MAX_COMMITS_PER_HOTKEY = 2
 
 
 def _repo_name_from_model_name(model_name: str) -> str:
@@ -72,4 +73,22 @@ def validate_commit_fields(
         if not repo_name_lower.endswith(hotkey_lower):
             return False, "model_name_must_end_with_hotkey"
 
+    return True, None
+
+
+def validate_commit_count(
+    commit_history_len: int,
+    max_commits: int = MAX_COMMITS_PER_HOTKEY,
+) -> Tuple[bool, Optional[str]]:
+    """Validate that a hotkey has not exceeded the maximum allowed commits.
+
+    Args:
+        commit_history_len: Number of historical commits for this hotkey.
+        max_commits: Maximum allowed commits per hotkey (default: 2).
+
+    Returns:
+        (is_valid, error_reason): is_valid is False if commit_history_len > max_commits.
+    """
+    if commit_history_len > max_commits:
+        return False, f"max_commits_exceeded_{max_commits}"
     return True, None

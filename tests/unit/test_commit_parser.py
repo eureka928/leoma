@@ -300,3 +300,61 @@ class TestCommitmentValidation:
         assert parse_commit("") == {}
         assert parse_commit(json.dumps({})) == {}
         assert parse_commit("   ") == {}
+
+
+class TestCommitCountValidation:
+    """Tests for commit count limit validation."""
+
+    def test_validate_commit_count_first_commit(self):
+        """First commit (history_len=1) is valid."""
+        from leoma.infra.commit_parser import validate_commit_count
+
+        is_valid, reason = validate_commit_count(1)
+        assert is_valid is True
+        assert reason is None
+
+    def test_validate_commit_count_second_commit(self):
+        """Second commit (history_len=2) is valid."""
+        from leoma.infra.commit_parser import validate_commit_count
+
+        is_valid, reason = validate_commit_count(2)
+        assert is_valid is True
+        assert reason is None
+
+    def test_validate_commit_count_exceeds_limit(self):
+        """Third commit (history_len=3) exceeds limit and is invalid."""
+        from leoma.infra.commit_parser import validate_commit_count
+
+        is_valid, reason = validate_commit_count(3)
+        assert is_valid is False
+        assert reason == "max_commits_exceeded_2"
+
+    def test_validate_commit_count_way_over_limit(self):
+        """Many commits (history_len=10) are invalid."""
+        from leoma.infra.commit_parser import validate_commit_count
+
+        is_valid, reason = validate_commit_count(10)
+        assert is_valid is False
+        assert reason == "max_commits_exceeded_2"
+
+    def test_validate_commit_count_zero_history(self):
+        """Zero history (shouldn't happen but should be valid)."""
+        from leoma.infra.commit_parser import validate_commit_count
+
+        is_valid, reason = validate_commit_count(0)
+        assert is_valid is True
+        assert reason is None
+
+    def test_validate_commit_count_custom_max(self):
+        """Test with custom max_commits parameter."""
+        from leoma.infra.commit_parser import validate_commit_count
+
+        # 3 commits with max=5 should be valid
+        is_valid, reason = validate_commit_count(3, max_commits=5)
+        assert is_valid is True
+        assert reason is None
+
+        # 6 commits with max=5 should be invalid
+        is_valid, reason = validate_commit_count(6, max_commits=5)
+        assert is_valid is False
+        assert reason == "max_commits_exceeded_5"
