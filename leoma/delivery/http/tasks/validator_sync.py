@@ -25,7 +25,9 @@ from leoma.infra.db.stores import ValidatorStore
 
 def _get_stake(meta, uid: int) -> float:
     """Get stake for a UID from metagraph. Prefer .S then .stake."""
-    stake_vec = getattr(meta, "S", None) or getattr(meta, "stake", None)
+    stake_vec = getattr(meta, "S", None)
+    if stake_vec is None:
+        stake_vec = getattr(meta, "stake", None)
     if stake_vec is None:
         return 0.0
     try:

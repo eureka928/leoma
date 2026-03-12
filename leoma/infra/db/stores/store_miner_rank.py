@@ -62,7 +62,7 @@ class MinerRankStore:
                 select(MinerRank.miner_hotkey).where(MinerRank.rank == 1).limit(1)
             )
             row = r.scalar_one_or_none()
-            return row[0] if row else None
+            return row  # scalar_one_or_none returns the value directly, not a tuple
 
     async def get_all_ordered_by_rank(self) -> List[MinerRank]:
         async with get_session() as session:

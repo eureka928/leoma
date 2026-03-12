@@ -83,6 +83,7 @@ def _normalize_generated_eval_result(
         result.get("overall_score"),
         default=_weighted_overall_score(aspect_scores),
     )
+    log(f"Overall score: {overall_score}")
     critical_floor = min(
         aspect_scores.get("first_frame_fidelity", 0),
         aspect_scores.get("prompt_adherence", 0),

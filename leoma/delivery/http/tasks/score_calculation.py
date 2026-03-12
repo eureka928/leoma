@@ -27,7 +27,7 @@ from leoma.infra.db.stores import (
 
 # Configuration
 SCORE_CALCULATION_INTERVAL = int(os.environ.get("SCORE_CALCULATION_INTERVAL", "300"))  # 5 min
-SCORER_INTERVAL = int(os.environ.get("SCORER_INTERVAL", "3600"))  # 1 hour
+SCORER_INTERVAL = int(os.environ.get("SCORER_INTERVAL", "1800"))  # 30 mins
 SCORER_TASK_WINDOW = 100
 SCORER_COMPLETENESS_THRESHOLD = 0.8
 # Dominance: late miner must beat each earlier miner's pass_rate by this threshold to be top
@@ -292,23 +292,31 @@ class ScoreCalculationTask:
 
     async def _run_rank_update(self) -> None:
         """Compute rank by dominance (block + 5% threshold), persist to miner_ranks.
-        Rank 1 = top-ranked miner; rest by passed_count desc. Used by GET /weights and GET /rank.
+        Rank 1 = top-ranked miner; rest by passed_count desc. Used by GET /weights and /rank.
+        
+        Only includes miners who are eligible (completeness >= threshold from miner_task_ranks).
         """
         log_header("Rank update (dominance)")
-        valid_miners = await self.valid_miners_dao.get_valid_miners()
-        if not valid_miners:
-            log("No valid miners for rank", "info")
+        
+        # Get miners from miner_task_ranks (already has completeness check)
+        task_ranked_miners = await self.miner_task_rank_dao.get_all_ranked()
+        if not task_ranked_miners:
+            log("No eligible miners in miner_task_ranks", "info")
+            # Clear miner_ranks if no eligible miners
+            await self.miner_rank_dao.replace_all([])
             return
-        aggregated = await self.rank_scores_dao.get_aggregated_scores()
+        
+        # Get block info from valid_miners
+        valid_miners = await self.valid_miners_dao.get_valid_miners()
         block_by_hotkey: Dict[str, Optional[int]] = {m.miner_hotkey: m.block for m in valid_miners}
+        
         miner_stats: List[Tuple[str, int, float, Optional[int]]] = []
-        for m in valid_miners:
+        for m in task_ranked_miners:
             hotkey = m.miner_hotkey
-            agg = aggregated.get(hotkey) or {}
-            total_passed = agg.get("total_passed", 0) or 0
-            total_samples = agg.get("total_samples", 0) or 0
-            pass_rate = agg.get("pass_rate") or (total_passed / total_samples if total_samples else 0.0)
-            miner_stats.append((hotkey, total_passed, float(pass_rate), block_by_hotkey.get(hotkey)))
+            passed_count = m.task_passed_count or 0
+            pass_rate = passed_count / m.tasks_evaluated if m.tasks_evaluated else 0.0
+            miner_stats.append((hotkey, passed_count, float(pass_rate), block_by_hotkey.get(hotkey)))
+        
         winner_hotkey, rank_entries = compute_rank_from_miner_stats(miner_stats, DOMINANCE_THRESHOLD)
         await self.miner_rank_dao.replace_all(rank_entries)
-        log(f"Rank updated: {len(rank_entries)} miners, top_hotkey={winner_hotkey[:12] if winner_hotkey else 'None'}...", "success")
+        log(f"Rank updated: {len(rank_entries)} eligible miners, top_hotkey={winner_hotkey[:12] if winner_hotkey else 'None'}...", "success")

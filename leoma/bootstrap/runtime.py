@@ -4,6 +4,7 @@ Runtime environment and logging.
 Loads configuration from the environment and provides console logging helpers.
 """
 
+import inspect
 import logging
 import os
 import sys
@@ -67,24 +68,31 @@ def _read_optional_str(name: str) -> Optional[str]:
 
 
 def _wall_clock() -> str:
-    return datetime.now().strftime("%H:%M:%S")
+    """Return full datetime string: YYYY-MM-DD HH:MM:SS"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _prefix(level: str, ts: str) -> str:
+def _get_caller_line() -> int:
+    """Get the line number where emit_log was called."""
+    # Walk up the stack to find the caller outside this file
+    for frame_info in inspect.stack():
+        # Skip frames inside runtime.py (where emit_log is defined)
+        if frame_info.filename != __file__:
+            return frame_info.lineno
+    return 0
+
+
+def _prefix(level: str, ts: str, line: int) -> str:
     timestamp = f"{_DIM}{ts}{_RESET}"
-    return f"{timestamp} {_LEVEL_TOKENS.get(level, ' ')}"
+    line_info = f"{_DIM}L{line}{_RESET}"
+    return f"{timestamp} {line_info} {_LEVEL_TOKENS.get(level, ' ')}"
 
 
 def emit_log(msg: str, level: str = "info") -> None:
-    """Print a timestamped log line with level prefix and forward to standard logger."""
+    """Print a timestamped log line with level prefix and caller line number."""
     ts = _wall_clock()
-    print(f"{_prefix(level, ts)} {msg}")
-    if level == "error":
-        logger.error("%s", msg)
-    elif level == "warn":
-        logger.warning("%s", msg)
-    else:
-        logger.info("%s", msg)
+    line = _get_caller_line()
+    print(f"{_prefix(level, ts, line)} {msg}")
 
 
 def emit_header(title: str) -> None:

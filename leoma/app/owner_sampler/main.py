@@ -54,7 +54,7 @@ from leoma.infra.judge import get_description_async
 from leoma.infra.chute_resolver import get_chute_info, build_chute_endpoint
 
 # Interval between sampling rounds (seconds)
-OWNER_SAMPLING_INTERVAL = int(os.environ.get("OWNER_SAMPLING_INTERVAL", "1800"))  # 30 min
+OWNER_SAMPLING_INTERVAL = int(os.environ.get("OWNER_SAMPLING_INTERVAL", "1200"))  # 20 min
 API_URL = os.environ.get("API_URL", "https://api.leoma.ai")
 
 # Track recently used videos (in-memory)

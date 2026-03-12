@@ -143,6 +143,7 @@ class MinerValidationTask:
                     # Validate commit fields (model_name must start with "leoma", end with hotkey)
                     is_valid, reason = validate_commit_fields(parsed, hotkey=hotkey)
                     if not is_valid:
+                        log(f"Invalid commit: {hotkey} - {reason}", "error")
                         validated_miners.append(
                             self._invalid_commit_entry(uid, hotkey, commit_block, reason)
                         )

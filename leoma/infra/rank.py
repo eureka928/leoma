@@ -35,12 +35,20 @@ def compute_rank_from_miner_stats(
     threshold: float,
 ) -> Tuple[Optional[str], List[dict]]:
     """From (hotkey, passed_count, pass_rate, block) list, compute top-ranked miner and full rank.
-    Returns (winner_hotkey, rank_entries)."""
+    Returns (winner_hotkey, rank_entries).
+    
+    If no dominant winner, the miner with highest passed_count gets rank 1 as fallback.
+    """
     if not miner_stats:
         return None, []
     block_by_hotkey: Dict[str, Optional[int]] = {m[0]: m[3] for m in miner_stats}
     winner_hotkey = find_dominant_winner(miner_stats, threshold)
     by_passed_count = sorted(miner_stats, key=lambda x: (-x[1], x[0]))
+    
+    # If no dominant winner, use highest passed_count as fallback for rank 1
+    if not winner_hotkey and by_passed_count:
+        winner_hotkey = by_passed_count[0][0]
+    
     rank_entries: List[dict] = []
     if winner_hotkey:
         rank_entries.append({

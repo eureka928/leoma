@@ -19,7 +19,7 @@ from typing import Optional, Dict, Any
 
 import aiohttp
 
-from leoma.bootstrap import NETUID, CHUTES_API_KEY, WALLET_NAME, HOTKEY_NAME
+from leoma.bootstrap import NETUID, CHUTES_API_KEY, WALLET_NAME, HOTKEY_NAME, NETWORK
 from leoma.bootstrap import emit_log as log
 
 _CHUTES_API_BASE = "https://api.chutes.ai"
@@ -379,7 +379,9 @@ async def commit_command(
     log(f"Using wallet: {wallet.hotkey.ss58_address[:16]}...", "info")
     
     async def _commit():
-        subtensor = bt.AsyncSubtensor(network="finney")
+        subtensor = bt.AsyncSubtensor(network=NETWORK)
+
+        log(f"Subtensor network configured to {NETWORK}", "info")
         data = _commit_payload(model_name, model_revision, chute_id)
         
         max_retries = 3

@@ -26,13 +26,21 @@ async def get_weights() -> WeightsResponse:
     miners list gives each miner's score (pass_rate) and assigned weight for transparency.
     If no top-ranked miner, winner_uid=0 so validators set weight to UID 0 (burn alpha).
     """
+    from leoma.bootstrap import emit_log as log
+    
     rows = await miner_rank_dao.get_all_ordered_by_rank()
     winner_hotkey = await miner_rank_dao.get_winner_hotkey()
+    
+    log(f"Weights endpoint: {len(rows)} rows in miner_ranks, winner_hotkey={winner_hotkey[:12] if winner_hotkey else 'None'}...", "info")
+    
     winner_uid = 0
     if winner_hotkey:
         miner = await valid_miners_dao.get_miner_by_hotkey(winner_hotkey)
         if miner:
             winner_uid = miner.uid
+            log(f"Found winner: hotkey={winner_hotkey[:12]}..., uid={winner_uid}", "info")
+        else:
+            log(f"Winner hotkey {winner_hotkey[:12]}... not found in valid_miners table", "warn")
 
     miners: List[MinerWeightEntry] = []
     for r in rows:

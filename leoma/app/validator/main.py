@@ -76,23 +76,35 @@ async def run_epoch(
 async def step(
     subtensor: bt.AsyncSubtensor,
     wallet: bt.Wallet,
-) -> None:
+) -> int | None:
     """Wait for epoch boundary and run weight setting.
 
     Args:
         subtensor: Bittensor async subtensor instance
         wallet: Bittensor wallet for signing transactions
+
+    Returns:
+        The epoch number that was processed, or None if waiting
     """
     current_block = await subtensor.get_current_block()
+    current_epoch = current_block // EPOCH_LEN
+
     if current_block % EPOCH_LEN != 0:
         remaining = EPOCH_LEN - (current_block % EPOCH_LEN)
         wait_time = 12 * remaining
         log(f"Block {current_block}: waiting {remaining} blocks (~{wait_time}s) until epoch", "info")
         await asyncio.sleep(wait_time)
-        return
+        return None
 
-    log_header(f"Leoma Epoch #{current_block // EPOCH_LEN} (block {current_block})")
+    log_header(f"Leoma Epoch #{current_epoch} (block {current_block})")
+
     await run_epoch(subtensor, wallet, current_block)
+
+    wait_time = EPOCH_LEN * 12
+    log(f"Waiting {wait_time}s until next epoch", "info")
+    await asyncio.sleep(wait_time)
+
+    return current_epoch
 
 
 async def main() -> None:
@@ -128,8 +140,15 @@ async def main() -> None:
     evaluator_task.add_done_callback(handle_evaluator_exception)
 
     log("Starting weight-setting loop...", "start")
+    last_epoch: int | None = None
     while True:
-        await step(subtensor, wallet)
+        try:
+            processed_epoch = await step(subtensor, wallet, last_epoch)
+            if processed_epoch is not None:
+                last_epoch = processed_epoch
+        except Exception as e:
+            log(f"Weight-setting loop error: {e}", "error")
+            await asyncio.sleep(10)
 
 
 def main_sync() -> None:
