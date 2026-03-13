@@ -91,13 +91,28 @@ app = FastAPI(
 )
 
 
+def _cors_headers_for_request(request: Request) -> dict[str, str]:
+    """Add CORS headers so error responses (e.g. 500) are visible to the frontend."""
+    origin = request.headers.get("origin")
+    if not origin:
+        return {}
+    origins = _cors_origins()
+    if "*" in origins:
+        return {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"}
+    if origin in origins:
+        return {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"}
+    return {}
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Return generic error in response; log full detail server-side."""
     leoma_logger.exception("Unhandled exception")
+    headers = _cors_headers_for_request(request)
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal error occurred"},
+        headers=headers,
     )
 
 # Request body size limit (DoS mitigation); set MAX_BODY_SIZE env (bytes, default 2MB)
