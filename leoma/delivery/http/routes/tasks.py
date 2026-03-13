@@ -5,6 +5,7 @@ Provides endpoints for task id (latest sampled task for validators),
 miner task list, and task-miner detail.
 """
 
+import json
 from typing import List
 
 from fastapi import APIRouter, HTTPException
@@ -108,17 +109,37 @@ async def get_task_miner_detail(
         if getattr(s, "latency_ms", None) is not None:
             latency_ms = getattr(s, "latency_ms", None)
             break
-    validator_results = [
-        TaskMinerValidatorResult(
-            validator_hotkey=s.validator_hotkey,
-            passed=s.passed,
-            stake=stake_map.get(s.validator_hotkey, 0.0),
-            evaluated_at=getattr(s, "evaluated_at", None),
-            confidence=getattr(s, "confidence", None),
-            reasoning=getattr(s, "reasoning", None),
+    def _parse_generated_artifacts(gen_art: str | None) -> tuple[dict[str, int] | None, int | None]:
+        if not gen_art:
+            return None, None
+        try:
+            data = json.loads(gen_art)
+            scores = data.get("aspect_scores")
+            aspect_scores = None
+            if isinstance(scores, dict):
+                aspect_scores = {k: int(v) for k, v in scores.items() if isinstance(v, (int, float))}
+            overall = data.get("overall_score")
+            overall_score = int(overall) if isinstance(overall, (int, float)) else None
+            return aspect_scores, overall_score
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+        return None, None
+
+    validator_results = []
+    for s in samples:
+        aspect_scores, overall_score = _parse_generated_artifacts(getattr(s, "generated_artifacts", None))
+        validator_results.append(
+            TaskMinerValidatorResult(
+                validator_hotkey=s.validator_hotkey,
+                passed=s.passed,
+                stake=stake_map.get(s.validator_hotkey, 0.0),
+                evaluated_at=getattr(s, "evaluated_at", None),
+                confidence=getattr(s, "confidence", None),
+                reasoning=getattr(s, "reasoning", None),
+                aspect_scores=aspect_scores,
+                overall_score=overall_score,
+            )
         )
-        for s in samples
-    ]
     prefix = str(task_id)
     safe_hotkey = miner_hotkey.replace("/", "_").replace("\\", "_")
     presigned = await get_task_media_presigned_urls(task_id, miner_hotkey)

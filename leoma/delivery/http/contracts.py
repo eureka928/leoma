@@ -304,6 +304,8 @@ class TaskMinerValidatorResult(BaseModel):
     evaluated_at: Optional[datetime] = None
     confidence: Optional[int] = None
     reasoning: Optional[str] = None
+    aspect_scores: Optional[Dict[str, int]] = None
+    overall_score: Optional[int] = None
 
 
 class TaskMinerDetailResponse(BaseModel):
