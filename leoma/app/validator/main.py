@@ -140,12 +140,9 @@ async def main() -> None:
     evaluator_task.add_done_callback(handle_evaluator_exception)
 
     log("Starting weight-setting loop...", "start")
-    last_epoch: int | None = None
     while True:
         try:
-            processed_epoch = await step(subtensor, wallet, last_epoch)
-            if processed_epoch is not None:
-                last_epoch = processed_epoch
+            await step(subtensor, wallet)
         except Exception as e:
             log(f"Weight-setting loop error: {e}", "error")
             await asyncio.sleep(10)

@@ -8,6 +8,8 @@ import asyncio
 
 import click
 
+from leoma import __version__
+
 
 def _run_async(coroutine) -> None:
     """Run an async coroutine from CLI commands."""
@@ -22,7 +24,7 @@ def _api_url() -> str:
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="leoma")
+@click.version_option(version=__version__, prog_name="leoma")
 def cli():
     """Leoma - Image-to-Video Generation Subnet
     

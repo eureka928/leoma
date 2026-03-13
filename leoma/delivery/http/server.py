@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from leoma import __version__
 from leoma.bootstrap import emit_log, emit_header, logger as leoma_logger
 from leoma.infra.db.pool import init_database, close_database, create_tables
 from leoma.delivery.http.routes import (
@@ -85,7 +86,7 @@ def _cors_origins() -> list[str]:
 app = FastAPI(
     title="Leoma API",
     description="Centralized API for Leoma subnet validators",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
 )
 

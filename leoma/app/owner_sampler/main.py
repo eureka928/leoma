@@ -331,14 +331,14 @@ async def run_owner_sampler_loop() -> None:
         try:
             log_header(f"Owner Sampler Round #{round_num}")
 
-            task_id = await sampling_state_dao.get_and_increment_next_task_id()
-            log(f"Allocated task_id={task_id}", "info")
-
             valid_miners = await _get_valid_miners_via_api()
             if not valid_miners:
-                log("No valid miners from API", "warn")
+                log("No valid miners from API; skipping round (task_id not incremented)", "warn")
                 await asyncio.sleep(OWNER_SAMPLING_INTERVAL)
                 continue
+
+            task_id = await sampling_state_dao.get_and_increment_next_task_id()
+            log(f"Allocated task_id={task_id}", "info")
 
             miners = _build_generation_miners(valid_miners)
             log(f"Found {len(miners)} valid miners", "info")

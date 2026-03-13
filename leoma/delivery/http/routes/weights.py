@@ -36,9 +36,11 @@ async def get_weights() -> WeightsResponse:
     winner_uid = 0
     if winner_hotkey:
         miner = await valid_miners_dao.get_miner_by_hotkey(winner_hotkey)
-        if miner:
+        if miner and miner.is_valid:
             winner_uid = miner.uid
             log(f"Found winner: hotkey={winner_hotkey[:12]}..., uid={winner_uid}", "info")
+        elif miner:
+            log(f"Winner hotkey {winner_hotkey[:12]}... is not valid (is_valid=False), using winner_uid=0", "warn")
         else:
             log(f"Winner hotkey {winner_hotkey[:12]}... not found in valid_miners table", "warn")
 
