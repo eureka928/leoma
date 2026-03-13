@@ -59,10 +59,10 @@ API_URL = os.environ.get("API_URL", "https://api.leoma.ai")
 
 # Track recently used videos (in-memory)
 USED_VIDEOS: list[str] = []
-MAX_VIDEO_HISTORY = int(os.environ.get("MAX_VIDEO_HISTORY", "50"))
+MAX_VIDEO_HISTORY = int(os.environ.get("MAX_VIDEO_HISTORY", "100"))
 
 # Concurrency
-MAX_CONCURRENT_MINERS = int(os.environ.get("MAX_CONCURRENT_MINERS", "5"))
+MAX_CONCURRENT_MINERS = int(os.environ.get("MAX_CONCURRENT_MINERS", "40"))
 DESCRIPTION_MAX_FRAMES = int(os.environ.get("DESCRIPTION_MAX_FRAMES", "12"))
 DESCRIPTION_FRAME_FPS = float(os.environ.get("DESCRIPTION_FRAME_FPS", "3"))
 ONE_SHOT_SCENE_THRESHOLD = float(os.environ.get("ONE_SHOT_SCENE_THRESHOLD", "0.18"))
@@ -328,13 +328,19 @@ async def run_owner_sampler_loop() -> None:
         video_path = clip_path = frame_path = original_frames_dir = None
         miner_paths: Dict[str, str] = {}
 
+        async def _sleep_until_next_round() -> None:
+            elapsed = time.time() - round_start
+            sleep_time = max(1, int(OWNER_SAMPLING_INTERVAL - elapsed))
+            log(f"Sleeping {sleep_time}s (interval={OWNER_SAMPLING_INTERVAL}s, elapsed={elapsed:.1f}s)...", "info")
+            await asyncio.sleep(sleep_time)
+
         try:
             log_header(f"Owner Sampler Round #{round_num}")
 
             valid_miners = await _get_valid_miners_via_api()
             if not valid_miners:
                 log("No valid miners from API; skipping round (task_id not incremented)", "warn")
-                await asyncio.sleep(OWNER_SAMPLING_INTERVAL)
+                await _sleep_until_next_round()
                 continue
 
             task_id = await sampling_state_dao.get_and_increment_next_task_id()
@@ -347,7 +353,7 @@ async def run_owner_sampler_loop() -> None:
             selected = await _select_one_shot_video(source_client, video_path)
             if not selected:
                 log("No source video contains a 5s one-shot segment; retrying next round", "warn")
-                await asyncio.sleep(OWNER_SAMPLING_INTERVAL)
+                await _sleep_until_next_round()
                 continue
             video_key, one_shot = selected
             duration = one_shot.video_duration_seconds
@@ -366,7 +372,7 @@ async def run_owner_sampler_loop() -> None:
 
             if not openai_client:
                 log("Skipping round: no OpenAI client", "warn")
-                await asyncio.sleep(OWNER_SAMPLING_INTERVAL)
+                await _sleep_until_next_round()
                 continue
 
             original_frames = await extract_frames(
@@ -377,7 +383,6 @@ async def run_owner_sampler_loop() -> None:
             )
             if len(original_frames) < 5:
                 log("Not enough frames, skipping", "warn")
-                await asyncio.sleep(OWNER_SAMPLING_INTERVAL)
                 continue
 
             original_frames_b64 = frames_to_base64(original_frames)
@@ -398,7 +403,7 @@ async def run_owner_sampler_loop() -> None:
             }
             if not successful:
                 log("No miners produced video", "warn")
-                await asyncio.sleep(OWNER_SAMPLING_INTERVAL)
+                await _sleep_until_next_round()
                 continue
 
             for hotkey in successful:
@@ -457,5 +462,4 @@ async def run_owner_sampler_loop() -> None:
             for p in (miner_paths or {}).values():
                 _remove_file(p)
 
-        log(f"Sleeping {OWNER_SAMPLING_INTERVAL}s...", "info")
-        await asyncio.sleep(OWNER_SAMPLING_INTERVAL)
+        await _sleep_until_next_round()
