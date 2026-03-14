@@ -40,8 +40,9 @@ async def run_epoch(
     wallet: bt.Wallet,
     block: int,
 ) -> None:
-    """Get winner_uid from API /weights, set top-ranked-only weights on-chain. If no top-ranked miner, UID 0 burns alpha."""
+    """Get winner_uid from API /weights, set top-ranked-only weights on-chain. If no top-ranked miner or API fails, UID 0 burns alpha."""
     log(f"[{block}] Fetching weights from API", "info")
+    winner_uid = 0
     try:
         from leoma.infra.remote_api import create_api_client_from_wallet
         api_client = create_api_client_from_wallet(
@@ -58,8 +59,7 @@ async def run_epoch(
         finally:
             await api_client.close()
     except Exception as e:
-        log(f"[{block}] Failed to get weights from API: {e}", "error")
-        return
+        log(f"[{block}] Failed to get weights from API: {e}; setting UID 0 (burn alpha)", "error")
 
     # Top-ranked-only weighting: set weight 1.0 for winner_uid only (or UID 0 to burn alpha)
     uids, weights = _build_weight_payload(winner_uid)
