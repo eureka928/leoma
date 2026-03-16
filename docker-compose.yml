@@ -11,6 +11,7 @@ services:
     env_file:
       - .env
     environment:
+      PYTHONUNBUFFERED: "1"
       API_URL: ${API_URL}
       NETWORK: ${NETWORK:-finney}
       NETUID: ${NETUID:-99}
